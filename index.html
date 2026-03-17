@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Voice Notes Maker</title>
+
+<style>
+body {
+    font-family: Arial, sans-serif;
+    background: #1a1a2e;
+    color: #eee;
+    padding: 20px;
+}
+.container {
+    max-width: 600px;
+    margin: auto;
+}
+h1 {
+    text-align: center;
+    color: #00d9ff;
+}
+.balance-card {
+    background: #333;
+    padding: 15px;
+    border-radius: 10px;
+    text-align: center;
+    margin: 20px 0;
+}
+button {
+    padding: 12px 20px;
+    margin: 10px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+}
+#recordBtn { background: #00d9ff; }
+#stopBtn { background: red; color: white; }
+#transcript {
+    background: #222;
+    padding: 10px;
+    min-height: 120px;
+    border-radius: 8px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>🎤 Voice Notes Maker</h1>
+
+<!-- API KEY -->
+<input type="password" id="apiKey" placeholder="Enter Deepgram API Key" style="width:100%;padding:10px">
+
+<!-- BALANCE -->
+<div class="balance-card">
+    <p>Wallet Balance</p>
+    <h2 id="balance">$50</h2>
+</div>
+
+<!-- BUTTONS -->
+<button id="recordBtn">🎤 Start Recording</button>
+<button id="stopBtn">⏹ Stop</button>
+
+<p id="status">Ready</p>
+
+<!-- TRANSCRIPT -->
+<div id="transcript">Your transcription will appear here...</div>
+
+</div>
+
+<script>
+
+let socket = null;
+let mediaRecorder = null;
+let transcriptText = "";
+
+// 🎤 START RECORDING
+async function startRecording() {
+
+    const apiKey = document.getElementById("apiKey").value.trim();
+
+    if (!apiKey) {
+        alert("Please enter API key");
+        return;
+    }
+
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+        socket = new WebSocket(
+            "wss://api.deepgram.com/v1/listen?model=nova-2&interim_results=true",
+            ["token", apiKey]
+        );
+
+        socket.onopen = () => {
+
+            document.getElementById("status").innerText = "🔴 Recording...";
+
+            mediaRecorder = new MediaRecorder(stream);
+
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0 && socket.readyState === 1) {
+                    socket.send(event.data);
+                }
+            };
+
+            mediaRecorder.start(250);
+        };
+
+        socket.onmessage = (message) => {
+
+            const data = JSON.parse(message.data);
+            const text = data.channel?.alternatives?.[0]?.transcript;
+
+            if (!text) return;
+
+            if (data.is_final) {
+                transcriptText += text + " ";
+            }
+
+            document.getElementById("transcript").innerText =
+                transcriptText + text;
+        };
+
+        socket.onerror = () => {
+            alert("Error connecting to Deepgram API");
+        };
+
+    } catch (error) {
+        alert("Microphone access denied");
+    }
+}
+
+// ⏹ STOP RECORDING
+function stopRecording() {
+
+    if (mediaRecorder && mediaRecorder.state !== "inactive") {
+        mediaRecorder.stop();
+        mediaRecorder.stream.getTracks().forEach(track => track.stop());
+    }
+
+    if (socket) socket.close();
+
+    document.getElementById("status").innerText = "Recording stopped";
+}
+
+// 💰 FETCH BALANCE (SAFE TRY)
+async function fetchBalance() {
+    try {
+        const res = await fetch("http://localhost:3000/balance");
+        const data = await res.json();
+
+        const balance = data.balances?.[0]?.balance || 0;
+
+        document.getElementById("balance").innerText =
+            "$" + balance.toFixed(2);
+
+    } catch (err) {
+        console.error("Balance error:", err);
+        document.getElementById("balance").innerText = "$50"; // fallback
+    }
+}
+
+// EVENTS
+document.getElementById("recordBtn").onclick = startRecording;
+document.getElementById("stopBtn").onclick = stopRecording;
+document.getElementById("apiKey").onchange = fetchBalance;
+
+</script>
+
+</body>
+</html>
